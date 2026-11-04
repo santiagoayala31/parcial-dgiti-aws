@@ -1,0 +1,195 @@
+name: CI/CD DGITI
+
+# CI  (siempre): lint + seguridad + pruebas unitarias e integración + validación Terraform
+# CD  (manual o push a main con AUTO_DEPLOY=true): terraform plan/apply + smoke test
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Acción de Terraform"
+        type: choice
+        options: [apply, plan, destroy]
+        default: apply
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  TF_VERSION: "1.10.5"
+  PYTHON_VERSION: "3.11"
+
+concurrency:
+  group: dgiti-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # --------------------------------------------------------------------- CI 1
+  app-tests:
+    name: "CI · Lint, seguridad y pruebas"
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: appuser
+          POSTGRES_PASSWORD: ci-throwaway
+          POSTGRES_DB: appdb
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U appuser"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: app/requirements-dev.txt
+
+      - name: Instalar dependencias
+        run: pip install -r requirements-dev.txt
+
+      - name: Validación de código (ruff)
+        run: ruff check .
+
+      - name: Análisis de seguridad del código (bandit)
+        run: bandit -r . -x ./tests
+
+      - name: Pruebas unitarias
+        run: pytest -v tests/test_api.py --junitxml=unit-results.xml
+
+      - name: Pruebas de integración (PostgreSQL real)
+        env:
+          DB_HOST: localhost
+          DB_PASSWORD: ci-throwaway
+        run: pytest -v tests/test_integration_db.py --junitxml=integration-results.xml
+
+      - name: Publicar resultados
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: app/*-results.xml
+
+      - name: Resumen
+        if: always()
+        run: |
+          echo "## Pruebas de la aplicación" >> "$GITHUB_STEP_SUMMARY"
+          python - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import glob, xml.etree.ElementTree as ET
+          print("| Suite | Pruebas | Fallas | Errores | Omitidas |")
+          print("|---|---|---|---|---|")
+          for f in sorted(glob.glob("*-results.xml")):
+              s = ET.parse(f).getroot()
+              s = s if s.tag == "testsuite" else s[0]
+              print(f"| {f.replace('-results.xml','')} | {s.get('tests')} | {s.get('failures')} | {s.get('errors')} | {s.get('skipped')} |")
+          EOF
+
+  # --------------------------------------------------------------------- CI 2
+  terraform-validate:
+    name: "CI · Validación Terraform"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: terraform init (sin backend)
+        run: terraform init -backend=false -input=false
+
+      - name: terraform validate
+        run: terraform validate
+
+      - name: Escaneo de seguridad IaC (Trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: infra
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+
+  # --------------------------------------------------------------------- CD
+  deploy:
+    name: "CD · Terraform plan/apply en AWS"
+    needs: [app-tests, terraform-validate]
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && vars.AUTO_DEPLOY == 'true')
+    runs-on: ubuntu-latest
+    environment: aws-academy
+    env:
+      TF_ACTION: ${{ github.event.inputs.action || 'apply' }}
+      TF_VAR_owner: ${{ vars.TF_OWNER || 'grupo-dgiti' }}
+      TF_IN_AUTOMATION: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      # Credenciales temporales de AWS Academy guardadas como GitHub Secrets
+      - name: Configurar credenciales AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verificar identidad (cuenta de AWS Academy)
+        run: aws sts get-caller-identity --query "{Cuenta:Account, Rol:Arn}" --output table
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Backend remoto (S3) + terraform init
+        run: bash scripts/tf-init.sh
+
+      - name: terraform plan
+        working-directory: infra
+        run: |
+          if [ "$TF_ACTION" = "destroy" ]; then
+            terraform plan -destroy -input=false -out=tfplan
+          else
+            terraform plan -input=false -out=tfplan
+          fi
+          terraform show -no-color tfplan | grep -E "^Plan:|No changes" | tee -a "$GITHUB_STEP_SUMMARY" || true
+
+      - name: terraform apply
+        if: env.TF_ACTION != 'plan'
+        working-directory: infra
+        run: terraform apply -input=false -auto-approve tfplan
+
+      - name: terraform output
+        if: env.TF_ACTION == 'apply'
+        working-directory: infra
+        run: |
+          terraform output
+          {
+            echo "## Despliegue"
+            echo "| Recurso | Valor |"
+            echo "|---|---|"
+            echo "| Servicio | $(terraform output -raw app_url) |"
+            echo "| Swagger | $(terraform output -raw swagger_url) |"
+            echo "| Versión | \`$(terraform output -raw app_version)\` |"
+            echo "| Dashboard | $(terraform output -raw cloudwatch_dashboard_url) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "APP_URL=$(terraform output -raw app_url)" >> "$GITHUB_ENV"
+
+      - name: Smoke test post-despliegue
+        if: env.TF_ACTION == 'apply'
+        run: python3 scripts/smoke_test.py "$APP_URL"
