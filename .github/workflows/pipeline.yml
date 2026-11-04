@@ -117,13 +117,10 @@ jobs:
       - name: terraform validate
         run: terraform validate
 
-      - name: Escaneo de seguridad IaC (Trivy)
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          scan-type: config
-          scan-ref: infra
-          severity: HIGH,CRITICAL
-          exit-code: "0"
+      - name: Escaneo de seguridad IaC (Checkov)
+        run: |
+          pip install -q checkov
+          checkov -d . --framework terraform --compact --quiet --soft-fail
 
   # --------------------------------------------------------------------- CD
   deploy:
