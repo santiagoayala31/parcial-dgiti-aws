@@ -38,6 +38,11 @@ ensure_bucket "$ARTIFACTS"  # artefactos de la aplicación
 terraform -chdir="$ROOT/infra" init -input=false -reconfigure \
   -backend-config="bucket=${BUCKET}" -backend-config="region=${REGION}"
 
+# Libera un bloqueo huérfano (p. ej. de una ejecución cancelada) si se indica
+if [ -n "${TF_LOCK_ID:-}" ]; then
+  terraform -chdir="$ROOT/infra" force-unlock -force "$TF_LOCK_ID"
+fi
+
 # Migración: versiones anteriores administraban el bucket con aws_s3_bucket
 STATE="$(terraform -chdir="$ROOT/infra" state list 2>/dev/null || true)"
 for addr in aws_s3_bucket.artifacts random_id.suffix; do
