@@ -1,0 +1,30 @@
+# Copie este archivo como terraform.tfvars y ajuste los valores.
+# terraform.tfvars está en .gitignore: nunca se suben valores reales al repositorio.
+
+aws_region   = "us-east-1"
+project_name = "dgiti"
+environment  = "prod"
+owner        = "jose-david-soria" # o "santiago-ayala"
+
+# Red
+vpc_cidr            = "10.0.0.0/16"
+public_subnet_cidrs = ["10.0.1.0/24", "10.0.2.0/24"]
+app_subnet_cidrs    = ["10.0.11.0/24", "10.0.12.0/24"]
+db_subnet_cidrs     = ["10.0.21.0/24", "10.0.22.0/24"]
+
+# Cómputo
+instance_type         = "t3.micro"
+instance_profile_name = "LabInstanceProfile"
+asg_min_size          = 2
+asg_desired_capacity  = 2
+asg_max_size          = 4
+cpu_target_percent    = 50
+
+# Base de datos (la contraseña la genera Terraform y queda en Secrets Manager)
+db_engine_version = "16"
+db_instance_class = "db.t3.micro"
+db_name           = "appdb"
+db_username       = "appuser"
+
+# Monitoreo (opcional): correo para alarmas
+alert_email = ""
