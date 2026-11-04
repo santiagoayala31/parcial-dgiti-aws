@@ -277,25 +277,22 @@ resource "aws_secretsmanager_secret_version" "db" {
 ###############################################################################
 # 4. ALMACENAMIENTO - bucket S3 de artefactos de despliegue
 ###############################################################################
-resource "random_id" "suffix" {
-  byte_length = 3
-}
-
-resource "aws_s3_bucket" "artifacts" {
-  bucket        = "${local.name}-artifacts-${data.aws_caller_identity.current.account_id}-${random_id.suffix.hex}"
-  force_destroy = true
-  tags          = { Name = "${local.name}-artifacts" }
+# El bucket se crea con scripts/tf-init.sh (AWS CLI): AWS Academy niega
+# s3:GetBucketObjectLockConfiguration, que el recurso aws_s3_bucket necesita leer.
+# Terraform administra su versionado, cifrado, bloqueo público y el artefacto.
+locals {
+  artifacts_bucket = "${var.project_name}-artifacts-${data.aws_caller_identity.current.account_id}"
 }
 
 resource "aws_s3_bucket_versioning" "artifacts" {
-  bucket = aws_s3_bucket.artifacts.id
+  bucket = local.artifacts_bucket
   versioning_configuration {
     status = "Enabled"
   }
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "artifacts" {
-  bucket = aws_s3_bucket.artifacts.id
+  bucket = local.artifacts_bucket
   rule {
     apply_server_side_encryption_by_default {
       sse_algorithm = "AES256"
@@ -304,7 +301,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "artifacts" {
 }
 
 resource "aws_s3_bucket_public_access_block" "artifacts" {
-  bucket                  = aws_s3_bucket.artifacts.id
+  bucket                  = local.artifacts_bucket
   block_public_acls       = true
   block_public_policy     = true
   ignore_public_acls      = true
@@ -326,7 +323,7 @@ data "archive_file" "app" {
 }
 
 resource "aws_s3_object" "app" {
-  bucket = aws_s3_bucket.artifacts.id
+  bucket = local.artifacts_bucket
   key    = local.artifact_key
   source = data.archive_file.app.output_path
   etag   = data.archive_file.app.output_md5
@@ -434,7 +431,7 @@ resource "aws_launch_template" "app" {
 
   user_data = base64encode(templatefile("${path.module}/user_data.sh", {
     aws_region      = var.aws_region
-    artifact_bucket = aws_s3_bucket.artifacts.id
+    artifact_bucket = local.artifacts_bucket
     artifact_key    = aws_s3_object.app.key
     app_version     = local.app_version
     app_port        = var.app_port
