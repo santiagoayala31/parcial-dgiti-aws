@@ -158,12 +158,9 @@ jobs:
           terraform_wrapper: false
 
       - name: Backend remoto (S3) + terraform init
+        env:
+          TF_LOCK_ID: ${{ github.event.inputs.lock_id }}
         run: bash scripts/tf-init.sh
-
-      - name: Liberar bloqueo huérfano (opcional)
-        if: github.event.inputs.lock_id != ''
-        working-directory: infra
-        run: terraform force-unlock -force "${{ github.event.inputs.lock_id }}"
 
       - name: terraform plan
         working-directory: infra
