@@ -476,15 +476,6 @@ resource "aws_autoscaling_group" "app" {
     version = aws_launch_template.app.latest_version
   }
 
-  # Despliegue rolling sin caída del servicio cuando cambia la versión de la app
-  instance_refresh {
-    strategy = "Rolling"
-    preferences {
-      min_healthy_percentage = 50
-      instance_warmup        = 180
-    }
-  }
-
   enabled_metrics = [
     "GroupMinSize",
     "GroupMaxSize",
@@ -501,6 +492,8 @@ resource "aws_autoscaling_group" "app" {
     propagate_at_launch = true
   }
 
+  # Nota: AWS Academy niega autoscaling:StartInstanceRefresh, así que no se usa
+  # instance_refresh; las instancias nuevas toman la última versión del Launch Template.
   lifecycle {
     ignore_changes = [desired_capacity] # lo administra la política de escalado
   }
