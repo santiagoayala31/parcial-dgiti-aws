@@ -6,19 +6,29 @@ Uso: python3 scripts/smoke_test.py http://<alb-dns>
 import json
 import sys
 import time
+import urllib.error
 import urllib.request
 
 BASE = sys.argv[1].rstrip("/")
 TIMEOUT_S = 900  # en el primer despliegue las EC2 tardan unos minutos en instalar
 
 
-def call(method: str, path: str, body: dict | None = None):
+def call(method: str, path: str, body: dict | None = None, retries: int = 8):
+    """Llama a la API; reintenta ante 502/503/504 (instancias que aún arrancan)."""
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(
-        BASE + path, data=data, method=method, headers={"Content-Type": "application/json"}
-    )
-    with urllib.request.urlopen(req, timeout=10) as r:  # nosec B310 - URL del ALB propio
-        return r.status, json.loads(r.read().decode())
+    for attempt in range(retries):
+        req = urllib.request.Request(
+            BASE + path, data=data, method=method, headers={"Content-Type": "application/json"}
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:  # nosec B310 - URL del ALB propio
+                return r.status, json.loads(r.read().decode())
+        except urllib.error.HTTPError as exc:
+            if exc.code in (502, 503, 504) and attempt < retries - 1:
+                print(f"{method} {path}: HTTP {exc.code}, reintentando...")
+                time.sleep(5)
+                continue
+            raise
 
 
 start = time.time()
