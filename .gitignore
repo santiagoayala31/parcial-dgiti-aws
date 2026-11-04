@@ -1,0 +1,26 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+tfplan
+infra/.build/
+crash.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*-results.xml
+
+# Resultados de pruebas de carga
+k6-summary-*.json
+
+# Credenciales
+.env
+*.pem
+credentials
