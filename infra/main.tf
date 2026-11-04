@@ -421,10 +421,11 @@ resource "aws_launch_template" "app" {
 
   block_device_mappings {
     device_name = "/dev/xvda"
+    # Sin "encrypted = true": en AWS Academy, tras reiniciar la sesión del lab,
+    # el Auto Scaling no puede lanzar EC2 con EBS cifrado (Client.InternalError).
     ebs {
       volume_size           = 8
       volume_type           = "gp3"
-      encrypted             = true
       delete_on_termination = true
     }
   }
