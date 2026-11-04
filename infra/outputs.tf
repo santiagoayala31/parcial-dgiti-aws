@@ -63,7 +63,7 @@ output "db_secret_name" {
 
 output "artifacts_bucket" {
   description = "Bucket S3 con los artefactos de despliegue"
-  value       = aws_s3_bucket.artifacts.id
+  value       = local.artifacts_bucket
 }
 
 output "security_groups" {
