@@ -14,6 +14,10 @@ on:
         type: choice
         options: [apply, plan, destroy]
         default: apply
+      lock_id:
+        description: "ID de un bloqueo huérfano de Terraform a liberar (opcional)"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -155,6 +159,11 @@ jobs:
 
       - name: Backend remoto (S3) + terraform init
         run: bash scripts/tf-init.sh
+
+      - name: Liberar bloqueo huérfano (opcional)
+        if: github.event.inputs.lock_id != ''
+        working-directory: infra
+        run: terraform force-unlock -force "${{ github.event.inputs.lock_id }}"
 
       - name: terraform plan
         working-directory: infra
