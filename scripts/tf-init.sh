@@ -50,3 +50,6 @@ for addr in aws_s3_bucket.artifacts random_id.suffix; do
     terraform -chdir="$ROOT/infra" state rm "$addr"
   fi
 done
+
+# Adopta recursos huérfanos de ejecuciones interrumpidas (idempotente)
+bash "$ROOT/scripts/adopt-orphans.sh"
