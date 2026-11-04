@@ -1,0 +1,52 @@
+name: Prueba de carga (k6)
+
+# Prueba de desempeño bajo demanda contra el ALB desplegado.
+# Mide tiempo de respuesta, usuarios virtuales, % de errores y el reparto del balanceador.
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "URL del servicio (terraform output app_url)"
+        required: true
+        type: string
+      profile:
+        description: "Perfil de carga"
+        type: choice
+        options: [full, quick]
+        default: full
+
+permissions:
+  contents: read
+
+jobs:
+  k6:
+    name: "Desempeño · k6 contra el ALB"
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: ${{ inputs.base_url }}
+      PROFILE: ${{ inputs.profile }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar k6
+        run: |
+          curl -sSL https://github.com/grafana/k6/releases/download/v1.0.0/k6-v1.0.0-linux-amd64.tar.gz | tar xz
+          sudo mv k6-v1.0.0-linux-amd64/k6 /usr/local/bin/k6
+          k6 version
+
+      - name: Reparto del balanceador (antes de la carga)
+        run: python3 scripts/lb_distribution.py "$BASE_URL" 300 20
+
+      - name: Prueba de carga k6
+        run: k6 run -e BASE_URL="$BASE_URL" -e PROFILE="$PROFILE" load-tests/k6-load.js
+
+      - name: Reparto del balanceador (después de la carga)
+        if: always()
+        run: python3 scripts/lb_distribution.py "$BASE_URL" 300 20
+
+      - name: Publicar resumen de k6
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-summary
+          path: k6-summary-*.json
